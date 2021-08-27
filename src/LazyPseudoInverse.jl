@@ -6,7 +6,7 @@ module LazyPseudoinverse
 
 using LinearAlgebra, PDMats
 import Base: *, \, promote_op, inv, collect, Matrix, size # overloads
-import LinearAlgebra: matprod
+import LinearAlgebra: matprod, cholesky
 import PDMats.PDMat
 
 export MatrixInnerProd, adjointmul, InvMatrixInnerProd, LazyLeftPseudoinverse
@@ -30,10 +30,16 @@ end
 Base.collect(AtA::MatrixInnerProd) = adjointmul(AtA.A',AtA.A)
 Base.Matrix(AtA::MatrixInnerProd) = collect(AtA)
 Base.size(AtA::MatrixInnerProd) = (size(AtA.A,2),size(AtA.A,2))
+function cholesky(AtA::MatrixInnerProd)
+    c = cholesky(collect(AtA), check = false)
+    if !issuccess(c)  lu(collect(AtA)); end
+    return c
+end
+
 # When user shows MatrixInnerProd, print the result (A'A) as if normal, even though it's really lazy
 Base.print_array(io::IO, A::MatrixInnerProd) = Base.print_array(io, adjointmul(A.A',A.A))
-\(AtA::MatrixInnerProd, B::AbstractVector) = cholesky(collect(AtA)) \ B 
-\(AtA::MatrixInnerProd, B::AbstractMatrix) = cholesky(collect(AtA)) \ B 
+\(AtA::MatrixInnerProd, B::AbstractVector) = cholesky(AtA) \ B 
+\(AtA::MatrixInnerProd, B::AbstractMatrix) = cholesky(AtA) \ B 
 *(AtA::MatrixInnerProd, B::AbstractVector) = collect(AtA)*B 
 *(AtA::MatrixInnerProd, B::AbstractMatrix) = collect(AtA)*B 
 # Only a few methods defined here, so many matrix operations will fail, e.g. A'A+B
@@ -74,11 +80,11 @@ Use `collect` to materialize an actual matrix. It can also be converted to
 struct InvMatrixInnerProd{T,S<:AbstractMatrix{T}} <: AbstractInvMatrixInnerProd{T}
     A::S
 end
-Base.collect(invAtA::InvMatrixInnerProd) = inv(cholesky(adjointmul(invAtA.A',invAtA.A)))
+Base.collect(invAtA::InvMatrixInnerProd) = inv(cholesky(invAtA.A'invAtA.A))
 Base.Matrix(invAtA::InvMatrixInnerProd) = collect(invAtA)
 Base.size(invAtA::InvMatrixInnerProd) = (size(invAtA.A,2),size(invAtA.A,2))
 # When user shows InvMatrixInnerProd, print the result inv(A'A) as computed regularly:
-Base.print_array(io::IO, A::InvMatrixInnerProd) = Base.print_array(io, inv(adjointmul(A.A',A.A)))
+Base.print_array(io::IO, A::InvMatrixInnerProd) = Base.print_array(io, inv(cholesky(A.A'A.A)))
 PDMats.PDMat(A::InvMatrixInnerProd) = PDMat(inv(adjointmul(A.A',A.A))) # Cholesky decomposition
 
 inv(AtA::MatrixInnerProd) = InvMatrixInnerProd(AtA.A) # lazy inverse
@@ -87,14 +93,14 @@ function *(invAtA::InvMatrixInnerProd,B::Adjoint) # inv(A'A)*B'
     if invAtA.A === B.parent  # B = A, so inv(A'A)*A'
         LazyLeftPseudoinverse(invAtA.A) # return the pseudo-inverse, ready to be right-multiplied
     else
-        cholesky(adjointmul(invAtA.A',invAtA.A))\B # use linear solve instead of explicit inverse
+        cholesky(invAtA.A'invAtA.A)\B # use linear solve instead of explicit inverse
     end
 end
 
 # Ensure that stuff like inv(A'A)B, or B*inv(A'A) still works as normal, although to get
 # useful functionality many other methods need to be defined
-*(invAtA::InvMatrixInnerProd,B::AbstractVector) = cholesky(adjointmul(invAtA.A',invAtA.A))\B 
-*(invAtA::InvMatrixInnerProd,B::AbstractMatrix) = cholesky(adjointmul(invAtA.A',invAtA.A))\B
+*(invAtA::InvMatrixInnerProd,B::AbstractVector) = cholesky(invAtA.A'invAtA.A)\B 
+*(invAtA::InvMatrixInnerProd,B::AbstractMatrix) = cholesky(invAtA.A'invAtA.A)\B
 *(B::AbstractMatrix,invAtA::InvMatrixInnerProd) = B*collect(invAtA)
 
 
